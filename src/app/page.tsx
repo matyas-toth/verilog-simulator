@@ -9,7 +9,8 @@ export default function Home() {
   const defaultVerilogCode = `module main(
   input [7:0] sw,
   input [4:0] btn,
-  output [9:0] LED
+  output [9:0] LED,
+  output [7:0] d0, output [7:0] d1, output [7:0] d2, output [7:0] d3, output [7:0] d4, output [7:0] d5, output [7:0] d6, output [7:0] d7
 );
 
   // Example: LED[0] is on when switch 0 is on
@@ -22,7 +23,7 @@ export default function Home() {
   assign LED[2] = sw[1] & sw[2];
 
   // Example: LED[3] is on when switch 3 OR button 1 is on
-  assign LED[3] = sw[3] \\| btn[1];
+  assign LED[3] = sw[3] | btn[1];
 
   // Example: LED[4] is on when switch 4 XOR switch 5 is true
   assign LED[4] = sw[4] ^ sw[5];
@@ -31,7 +32,7 @@ export default function Home() {
   assign LED[5] = !sw[6];
 
   // Example: LED[6] is on when any of the first 4 switches are on
-  assign LED[6] = \\|sw[3:0];
+  assign LED[6] = |sw[3:0];
 
   // Example: LED[7] is on when all of the last 4 switches are on
   assign LED[7] = &sw[7:4];

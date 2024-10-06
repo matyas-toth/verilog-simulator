@@ -21,17 +21,22 @@ export function simulateVerilog(code: string, inputs: SimulationInputs): Simulat
         LED: Array(10).fill(false),
         sevenSegDisplays: Array(8).fill(null).map(() => Array(8).fill(false))
     }
-    const wireValues: { [key: string]: boolean } = {}
+    const wireValues: { [key: string]: boolean | boolean[] } = {}
 
     // Evaluate all assignments
     for (const [output, expression] of Object.entries(module.assignments)) {
         const value = evaluateExpression(expression, inputs, wireValues)
         if (output.startsWith('LED[')) {
             const index = parseInt(output.match(/\d+/)?.[0] || '0')
-            outputs.LED[index] = value
+            outputs.LED[index] = value as boolean
         } else if (output.match(/d\d+\[\d\]/)) {
             const [display, segment] = output.match(/\d+/g)?.map(Number) || [0, 0]
-            outputs.sevenSegDisplays[display][segment] = value
+            outputs.sevenSegDisplays[display][segment] = value as boolean
+        } else if (output.match(/d\d+/)) {
+            const display = parseInt(output.match(/\d+/)?.[0] || '0')
+            if (Array.isArray(value)) {
+                outputs.sevenSegDisplays[display] = value.slice(0, 8)
+            }
         } else {
             wireValues[output] = value
         }
@@ -68,59 +73,76 @@ function parseModule(code: string): Module {
             module.wires.add(name)
         }
 
-        const assignMatch = line.match(/assign\s+(\w+(?:\[\d+\])?)\s*=\s*(.+);/)
+        const assignMatch = line.match(/assign\s+(\w+(?:\[\d+\])?|\w+)\s*=\s*(.+);/)
         if (assignMatch) {
             const [_, output, expression] = assignMatch
-            module.assignments[output] = expression.trim()
+            module.assignments[output.trim()] = expression.trim()
         }
     }
 
     return module
 }
 
-function evaluateExpression(expression: string, inputs: SimulationInputs, wireValues: { [key: string]: boolean }): boolean {
-    const tokens = expression.match(/!*\w+(?:\[\d+\])?|&&|\|\||\^|&|\|/g) || [];
-    const stack: boolean[] = [];
+function evaluateExpression(expression: string, inputs: SimulationInputs, wireValues: { [key: string]: boolean | boolean[] }): boolean | boolean[] {
+    if (expression === 'sw' || expression === 'btn') {
+        return inputs[expression]
+    }
+
+    const tokens = expression.match(/!*\w+(?:\[\d+\])?|&&|\|\||\^|&|\|/g) || []
+    const stack: (boolean | boolean[])[] = []
 
     for (const token of tokens) {
         if (token.startsWith('!sw[')) {
-            const index = parseInt(token.match(/\d+/)?.[0] || '0');
-            stack.push(!inputs.sw[index]);
+            const index = parseInt(token.match(/\d+/)?.[0] || '0')
+            stack.push(!inputs.sw[index])
         } else if (token.startsWith('sw[')) {
-            const index = parseInt(token.match(/\d+/)?.[0] || '0');
-            stack.push(inputs.sw[index]);
+            const index = parseInt(token.match(/\d+/)?.[0] || '0')
+            stack.push(inputs.sw[index])
         } else if (token.startsWith('!btn[')) {
-            const index = parseInt(token.match(/\d+/)?.[0] || '0');
-            stack.push(!inputs.btn[index]);
+            const index = parseInt(token.match(/\d+/)?.[0] || '0')
+            stack.push(!inputs.btn[index])
         } else if (token.startsWith('btn[')) {
-            const index = parseInt(token.match(/\d+/)?.[0] || '0');
-            stack.push(inputs.btn[index]);
+            const index = parseInt(token.match(/\d+/)?.[0] || '0')
+            stack.push(inputs.btn[index])
         } else if (token in wireValues) {
-            stack.push(wireValues[token]);
+            stack.push(wireValues[token])
         } else if (token.startsWith('!') && token.slice(1) in wireValues) {
-            stack.push(!wireValues[token.slice(1)]);
+            const value = wireValues[token.slice(1)]
+            stack.push(Array.isArray(value) ? value.map(v => !v) : !value)
         } else if (token === '&&') {
-            const b = stack.pop() || false;
-            const a = stack.pop() || false;
-            stack.push(a && b);
+            const b = stack.pop()
+            const a = stack.pop()
+            stack.push(combineArrays(a, b, (x, y) => x && y))
         } else if (token === '||') {
-            const b = stack.pop() || false;
-            const a = stack.pop() || false;
-            stack.push(a || b);
+            const b = stack.pop()
+            const a = stack.pop()
+            stack.push(combineArrays(a, b, (x, y) => x || y))
         } else if (token === '^') {
-            const b = stack.pop() || false;
-            const a = stack.pop() || false;
-            stack.push(a !== b);
+            const b = stack.pop()
+            const a = stack.pop()
+            stack.push(combineArrays(a, b, (x, y) => x !== y))
         } else if (token === '&') {
-            const b = stack.pop() || false;
-            const a = stack.pop() || false;
-            stack.push(a && b);
+            const b = stack.pop()
+            const a = stack.pop()
+            stack.push(combineArrays(a, b, (x, y) => x && y))
         } else if (token === '|') {
-            const b = stack.pop() || false;
-            const a = stack.pop() || false;
-            stack.push(a || b);
+            const b = stack.pop()
+            const a = stack.pop()
+            stack.push(combineArrays(a, b, (x, y) => x || y))
         }
     }
 
-    return stack.pop() || false;
+    return stack.pop() || false
+}
+
+function combineArrays(a: boolean | boolean[] | undefined, b: boolean | boolean[] | undefined, op: (x: boolean, y: boolean) => boolean): boolean | boolean[] {
+    if (Array.isArray(a) && Array.isArray(b)) {
+        return a.map((val, index) => op(val, b[index]))
+    } else if (Array.isArray(a) && typeof b === 'boolean') {
+        return a.map(val => op(val, b))
+    } else if (typeof a === 'boolean' && Array.isArray(b)) {
+        return b.map(val => op(a, val))
+    } else {
+        return op(a as boolean, b as boolean)
+    }
 }
